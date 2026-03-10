@@ -1209,7 +1209,7 @@ async function approveLetter(id) {
     `
         <form id="approve-form">
             <div class="form-group"><label>Nomor Surat</label>
-            <div style="display:flex"><span style="padding:10px;background:#eee">KP.03.04/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
+            <div style="display:flex"><span style="padding:10px;background:#eee">1ogUFkMtjEssEC7MQOfqGkznmwWL3PWUJaZKIu62yIbw/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
             </div>
             <div style="margin-top:20px; text-align:right">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1222,7 +1222,7 @@ async function approveLetter(id) {
     e.preventDefault();
     const updateData = {
       letter_number:
-        "KP.03.04/F.XXIX.19.4/" + document.getElementById("a_num").value,
+        "PP.06.02/F.XXIX.19.4/" + document.getElementById("a_num").value,
       signatory_position: settings.signatory_position,
       signatory_name: settings.signatory_name,
       signatory_nip: settings.signatory_nip,
@@ -1711,3 +1711,4 @@ document.addEventListener("click", (e) => {
 });
 
 switchScreen("login-screen");
+
