@@ -1003,11 +1003,12 @@ function renderValidationQueue(container) {
                             <th>Judul</th>
                             <th>Tujuan (Penguji)</th>
                             <th>Tgl Pengajuan</th>
+                            <th>Jam</th>
                             <th>Status</th>
                             <th class="td-actions">Aksi</th>
                         </tr>
                     </thead>
-                    <tbody id="validation-table-body"><tr><td colspan="7" style="text-align:center; padding:40px;">Memuat antrean...</td></tr></tbody>
+                    <tbody id="validation-table-body"><tr><td colspan="8" style="text-align:center; padding:40px;">Memuat antrean...</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -1061,6 +1062,10 @@ async function loadValidationQueue() {
             <td style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-muted)">
                 <i class="far fa-calendar-alt"></i> ${new Date(l.submission_date).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}
             </td>
+            <td style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-muted)">
+                <i class="far fa-clock"></i> ${formatTimeID(l.exam_time)}
+            </td>
+            <td><span class="badge badge-pending">Pending</span></td>
             <td class="td-actions">
                 <div style="display:flex; justify-content:flex-end; gap:10px; align-items:center;">
                     <button class="btn btn-icon" title="Preview" onclick="previewLetter('${l.id}')">
@@ -1078,7 +1083,7 @@ async function loadValidationQueue() {
     `,
       )
       .join("") ||
-    '<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
+    '<tr><td colspan="8" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
 }
 
 // --- ARCHIVE (APPROVED ONLY) ---
@@ -1209,7 +1214,7 @@ async function approveLetter(id) {
     `
         <form id="approve-form">
             <div class="form-group"><label>Nomor Surat</label>
-            <div style="display:flex"><span style="padding:10px;background:#eee">1ogUFkMtjEssEC7MQOfqGkznmwWL3PWUJaZKIu62yIbw/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
+            <div style="display:flex"><span style="padding:10px;background:#eee">PP.06.02/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
             </div>
             <div style="margin-top:20px; text-align:right">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1528,17 +1533,6 @@ function buildLetterHTML(l, forPrint = false) {
   const kopUrl = new URL("assets/kop.png", window.location.href).href;
   const ttdUrl = new URL("assets/ttd.png", window.location.href).href;
 
-  const fixTime = (t) => {
-    if (!t) return "";
-    if (t.includes("T")) {
-      const dt = new Date(t);
-      return dt
-        .toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
-        .replace(".", ":");
-    }
-    return t;
-  };
-
   return `
     <div style="font-family:'Times New Roman', serif; line-height: 1.6; color: black; padding: 20px;">
         <div style="text-align:center;margin-bottom:20px">
@@ -1591,7 +1585,7 @@ function buildLetterHTML(l, forPrint = false) {
             <tr>
                 <td>Jam</td>
                 <td>:</td>
-                <td>${fixTime(l.exam_time)} s/d ${fixTime(l.exam_time_end) || "Selesai"} WITA</td>
+                <td>${formatTimeID(l.exam_time)} s/d ${formatTimeID(l.exam_time_end) || "Selesai"} WITA</td>
             </tr>
             <tr>
                 <td>Tempat</td>
@@ -1711,5 +1705,3 @@ document.addEventListener("click", (e) => {
 });
 
 switchScreen("login-screen");
-
-
