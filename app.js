@@ -5,7 +5,7 @@
 
 // --- CONFIGURATION ---
 const GAS_WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbxvCLxehz-NSiVE_0Njo5rCFr2Z48hTA0bpQhm_sXQ_4qH0AMUpq0FaQjJ2kXXNQKNVjQ/exec";
+  "https://script.google.com/macros/s/AKfycbzPO7LEwZXy1BfdH6Pp1idCa3sd1l9pNnQBud2Ngax9WsqcSAJAMGsp4OJFhXaIuT21/exec";
 
 // --- STATE MANAGEMENT ---
 const state = {
@@ -1711,4 +1711,5 @@ document.addEventListener("click", (e) => {
 });
 
 switchScreen("login-screen");
+
 
