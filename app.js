@@ -1209,7 +1209,7 @@ async function approveLetter(id) {
     `
         <form id="approve-form">
             <div class="form-group"><label>Nomor Surat</label>
-            <div style="display:flex"><span style="padding:10px;background:#eee">PP.06.02/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
+            <div style="display:flex"><span style="padding:10px;background:#eee">KP.03.04/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
             </div>
             <div style="margin-top:20px; text-align:right">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1222,10 +1222,11 @@ async function approveLetter(id) {
     e.preventDefault();
     const updateData = {
       letter_number:
-        "PP.06.02/F.XXIX.19.4/" + document.getElementById("a_num").value,
+        "KP.03.04/F.XXIX.19.4/" + document.getElementById("a_num").value,
       signatory_position: settings.signatory_position,
       signatory_name: settings.signatory_name,
       signatory_nip: settings.signatory_nip,
+      letter_date: new Date().toISOString(),
     };
     await api("updateLetterStatus", { id, status: "Approved", updateData });
     showToast("Surat Disetujui");
@@ -1503,8 +1504,8 @@ async function renderSignatorySettings(container) {
 
 // --- PREVIEW & PRINT ---
 function buildLetterHTML(l, forPrint = false) {
-  const dExam = new Date(l.exam_date || Date.now());
-  const dLetter = new Date(l.approval_date || l.submission_date || Date.now());
+  const dUjian = new Date(l.exam_date || Date.now());
+  const dSurat = new Date(l.letter_date || Date.now());
   const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const months = [
     "Januari",
@@ -1520,10 +1521,9 @@ function buildLetterHTML(l, forPrint = false) {
     "November",
     "Desember",
   ];
-
-  const letterDateStr = `${dLetter.getDate()} ${months[dLetter.getMonth()]} ${dLetter.getFullYear()}`;
-  const examDateStr = `${dExam.getDate()} ${months[dExam.getMonth()]} ${dExam.getFullYear()}`;
-  const examDayName = days[dExam.getDay()];
+  const dateStrUjian = `${dUjian.getDate()} ${months[dUjian.getMonth()]} ${dUjian.getFullYear()}`;
+  const dayNameUjian = days[dUjian.getDay()];
+  const dateStrSurat = `${dSurat.getDate()} ${months[dSurat.getMonth()]} ${dSurat.getFullYear()}`;
 
   const kopUrl = new URL("assets/kop.png", window.location.href).href;
   const ttdUrl = new URL("assets/ttd.png", window.location.href).href;
@@ -1550,7 +1550,7 @@ function buildLetterHTML(l, forPrint = false) {
                 <td style="width:80px">Nomor</td>
                 <td style="width:10px">:</td>
                 <td>${l.letter_number || "......."}</td>
-                <td style="text-align:right">${letterDateStr}</td>
+                <td style="text-align:right">${dateStrSurat}</td>
             </tr>
             <tr>
                 <td>Perihal</td>
@@ -1586,7 +1586,7 @@ function buildLetterHTML(l, forPrint = false) {
             <tr>
                 <td style="width:100px;">Hari/Tgl</td>
                 <td style="width:15px;">:</td>
-                <td>${examDayName}, ${examDateStr}</td>
+                <td>${dayNameUjian}, ${dateStrUjian}</td>
             </tr>
             <tr>
                 <td>Jam</td>
@@ -1711,5 +1711,3 @@ document.addEventListener("click", (e) => {
 });
 
 switchScreen("login-screen");
-
-
