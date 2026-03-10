@@ -5,7 +5,7 @@
 
 // --- CONFIGURATION ---
 const GAS_WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbwlng64hc59P_31NZ68HUvwHoQkgimlUzeCHGZu1WOxJfoeETXr01G2QPiZtbNFmxRM8w/exec";
+  "https://script.google.com/macros/s/AKfycbxvCLxehz-NSiVE_0Njo5rCFr2Z48hTA0bpQhm_sXQ_4qH0AMUpq0FaQjJ2kXXNQKNVjQ/exec";
 
 // --- STATE MANAGEMENT ---
 const state = {
@@ -16,60 +16,18 @@ const state = {
   currentView: "dashboard",
   loading: false,
   cache: {},
-  chartInstance: null,
 };
 
 // Cache TTL (Time To Live) in milliseconds (5 minutes)
 const CACHE_TTL = 5 * 60 * 1000;
 
-// --- PAGINATION SYSTEM ---
-const ITEMS_PER_PAGE = 15;
-const paginationState = {};
-
-function paginateData(data, viewId) {
-  if (!paginationState[viewId]) paginationState[viewId] = { page: 1 };
-  const p = paginationState[viewId];
-  const total = data.length;
-  const totalPages = Math.ceil(total / ITEMS_PER_PAGE) || 1;
-  if (p.page > totalPages) p.page = totalPages;
-  const start = (p.page - 1) * ITEMS_PER_PAGE;
-  return {
-    items: data.slice(start, start + ITEMS_PER_PAGE),
-    page: p.page, totalPages, total,
-    start: start + 1, end: Math.min(start + ITEMS_PER_PAGE, total)
-  };
-}
-
-function renderPagination(containerId, viewId, total, pg, reloadFn) {
-  const el = document.getElementById(containerId);
-  if (!el || total <= ITEMS_PER_PAGE) { if (el) el.innerHTML = ''; return; }
-  const pages = [];
-  for (let i = 1; i <= pg.totalPages; i++) {
-    if (i === 1 || i === pg.totalPages || (i >= pg.page - 1 && i <= pg.page + 1)) {
-      pages.push(i);
-    } else if (pages[pages.length - 1] !== '...') {
-      pages.push('...');
-    }
-  }
-  el.innerHTML = `
-    <div class="pagination">
-      <span class="pagination-info">Menampilkan ${pg.start}-${pg.end} dari ${total} data</span>
-      <div class="pagination-controls">
-        <button class="page-btn" ${pg.page <= 1 ? 'disabled' : ''} onclick="paginationState['${viewId}'].page--;${reloadFn}"><i class="fas fa-chevron-left"></i></button>
-        ${pages.map(p => p === '...' ? '<span style="color:var(--text-muted);padding:0 4px">...</span>' : `<button class="page-btn ${p === pg.page ? 'active' : ''}" onclick="paginationState['${viewId}'].page=${p};${reloadFn}">${p}</button>`).join('')}
-        <button class="page-btn" ${pg.page >= pg.totalPages ? 'disabled' : ''} onclick="paginationState['${viewId}'].page++;${reloadFn}"><i class="fas fa-chevron-right"></i></button>
-      </div>
-    </div>
-  `;
-}
-
 // --- CORE FUNCTIONS ---
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").then((reg) => {
-    console.log("Service Worker registered:", reg.scope);
-  }).catch((err) => {
-    console.warn("SW registration failed:", err);
+  navigator.serviceWorker.getRegistrations().then(function (registrations) {
+    for (let registration of registrations) {
+      registration.unregister();
+    }
   });
 }
 
@@ -109,7 +67,7 @@ async function api(action, data = {}, forceRefresh = false) {
     const formData = new URLSearchParams();
     formData.append("payload", bodyData);
 
-    const response = await fetch(url, { method: "POST", body: formData, redirect: "follow" });
+    const response = await fetch(url, { method: "POST", body: formData });
     const text = await response.text();
 
     let result;
@@ -195,12 +153,6 @@ function renderSidebar() {
       label: "Surat Saya",
       icon: "fas fa-file-alt",
     });
-  } else if (state.user.role === "staff") {
-    items.push({
-      id: "staff-archive",
-      label: "Arsip Surat Saya",
-      icon: "fas fa-archive",
-    });
   }
 
   nav.innerHTML = items
@@ -225,8 +177,6 @@ function renderSidebar() {
 
 function navigateTo(view) {
   state.currentView = view;
-  // Persist current view to localStorage
-  try { localStorage.setItem('esurat_view', view); } catch(e) {}
   renderSidebar();
   const titleMap = {
     dashboard: "Dashboard Overview",
@@ -236,7 +186,6 @@ function navigateTo(view) {
     "validate-letters": "Antrean Validasi Surat",
     archive: "Arsip Surat (Selesai)",
     "my-letters": "Permohonan Surat Saya",
-    "staff-archive": "Arsip Surat Saya",
     "admin-report": "Laporan Statistik",
     "settings-signatory": "Pengaturan Penandatangan",
   };
@@ -272,9 +221,6 @@ function renderContent() {
     case "admin-report":
       renderAdminReport(container);
       break; // FIXED
-    case "staff-archive":
-      renderStaffArchive(container);
-      break;
     case "settings-signatory":
       renderSignatorySettings(container);
       break;
@@ -325,7 +271,7 @@ async function renderDashboard(container) {
       </div>
     `;
     setTimeout(() => renderDashboardCharts(stats), 100);
-  } else if (state.user.role === "mahasiswa") {
+  } else {
     // Mahasiswa Stats
     let letters = await api("getLetters", {
       role: "mahasiswa",
@@ -337,26 +283,6 @@ async function renderDashboard(container) {
     const draft = letters.filter((l) => l.status === "Draft").length;
     const returned = letters.filter((l) => l.status === "Returned").length;
     const approved = letters.filter((l) => l.status === "Approved").length;
-    const recent = letters.slice(0, 5);
-
-    const statusDotClass = (s) => s === 'Approved' ? 'approved' : s === 'Returned' ? 'returned' : s === 'Pending' ? 'pending' : 'draft';
-
-    const timelineHtml = recent.length ? recent.map(l => `
-      <div class="timeline-item">
-        <div class="timeline-dot ${statusDotClass(l.status)}"></div>
-        <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-weight:700;font-size:0.9rem;color:var(--text-main)">${l.letter_type}</div>
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;max-width:350px;line-height:1.4">${l.proposal_title || '-'}</div>
-          </div>
-          <div style="text-align:right">
-            ${getStatusBadge(l.status)}
-            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px"><i class="far fa-calendar-alt"></i> ${new Date(l.submission_date).toLocaleDateString('id-ID')}</div>
-          </div>
-        </div>
-        ${l.status === 'Returned' && l.rejection_notes ? `<div style="margin-top:10px;padding:8px 12px;background:#fff1f2;border-left:3px solid #ef4444;border-radius:6px;font-size:0.8rem;color:#b91c1c"><i class="fas fa-exclamation-circle"></i> <b>Revisi:</b> ${l.rejection_notes}</div>` : ''}
-      </div>
-    `).join('') : '<p style="color:var(--text-muted);text-align:center;padding:20px">Belum ada surat yang diajukan.</p>';
 
     statsHtml = `
       <div class="stats-grid">
@@ -374,72 +300,17 @@ async function renderDashboard(container) {
         </div>
         <div class="stat-card">
           <div class="stat-icon gray"><i class="fas fa-edit"></i></div>
-          <div class="stat-info"><span class="label">Draft</span><span class="value">${draft}</span></div>
+          <div class="stat-info"><span class="label">Draft Belum Kirim</span><span class="value">${draft}</span></div>
         </div>
       </div>
       
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
-        <div class="card">
-          <div class="card-header"><h3><i class="fas fa-stream"></i> Riwayat Surat Terbaru</h3></div>
-          <div style="padding:20px">
-            <div class="timeline">${timelineHtml}</div>
-          </div>
-        </div>
-        <div>
-          <div class="card">
-            <div class="card-header"><h3><i class="fas fa-info-circle"></i> Informasi</h3></div>
-            <div style="padding:20px">
-              <p>Selamat datang di layanan <b>E-Surat</b>. Pastikan data yang Anda inputkan benar sesuai dengan draf pendaftaran ujian Anda.</p>
-              <div style="margin-top:12px;padding:10px;background:#fff8eb;border-left:4px solid #f59e0b;border-radius:6px">
-                <small><b>Tips:</b> Jika surat Anda berstatus "Returned", silakan klik tombol edit di menu "Surat Saya" untuk melihat catatan revisi dari admin.</small>
-              </div>
+      <div class="card" style="margin-top: 20px;">
+        <div class="card-header"><h3><i class="fas fa-info-circle"></i> Informasi Terbaru</h3></div>
+        <div style="padding: 20px;">
+            <p>Selamat datang di layanan <b>E-Surat</b>. Pastikan data yang Anda inputkan benar sesuai dengan draf pendaftaran ujian Anda.</p>
+            <div style="margin-top: 12px; padding: 10px; background: #fff8eb; border-left: 4px solid #f59e0b; border-radius: 6px;">
+                <small><b>Tips:</b> Jika surat Anda berstatus "Returned", silakan klik tombol edit di menu "Data Surat Saya" untuk melihat catatan revisi dari admin.</small>
             </div>
-          </div>
-          <div class="quick-actions">
-            <div class="quick-action-btn" onclick="navigateTo('my-letters');setTimeout(()=>openLetterForm(),300)">
-              <i class="fas fa-plus-circle"></i> Buat Surat Baru
-            </div>
-            <div class="quick-action-btn" onclick="navigateTo('my-letters')">
-              <i class="fas fa-list-alt"></i> Lihat Semua Surat
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  } else if (state.user.role === "staff") {
-    // Staff (Penguji/Pembimbing) Dashboard
-    let letters = await api("getLetters", { role: "staff", userId: state.user.id });
-    if (!Array.isArray(letters)) letters = [];
-    const total = letters.length;
-    const asExaminer = letters.filter((l) => l.examiner_name === state.user.name).length;
-    const asSupervisor = letters.filter((l) => l.supervisor_name === state.user.name).length;
-
-    statsHtml = `
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon blue"><i class="fas fa-file-alt"></i></div>
-          <div class="stat-info"><span class="label">Total Surat</span><span class="value">${total}</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon green"><i class="fas fa-user-tie"></i></div>
-          <div class="stat-info"><span class="label">Sebagai Penguji</span><span class="value">${asExaminer}</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon orange"><i class="fas fa-chalkboard-teacher"></i></div>
-          <div class="stat-info"><span class="label">Sebagai Pembimbing</span><span class="value">${asSupervisor}</span></div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-top:20px">
-        <div class="card-header"><h3><i class="fas fa-info-circle"></i> Informasi</h3></div>
-        <div style="padding:20px">
-          <p>Selamat datang, <b>${state.user.name}</b>. Anda dapat melihat dan mengunduh surat-surat undangan ujian yang ditujukan kepada Anda.</p>
-        </div>
-      </div>
-
-      <div class="quick-actions" style="margin-top:16px">
-        <div class="quick-action-btn" onclick="navigateTo('staff-archive')">
-          <i class="fas fa-archive"></i> Lihat Arsip Surat Saya
         </div>
       </div>
     `;
@@ -448,21 +319,10 @@ async function renderDashboard(container) {
 }
 
 function renderDashboardCharts(stats) {
-  if (typeof Chart === 'undefined') {
-    const el = document.getElementById("statusChart");
-    if (el) el.parentElement.innerHTML = '<p style="color:var(--danger)">Gagal memuat Chart.js (koneksi terputus)</p>';
-    return;
-  }
   const ctx = document.getElementById("statusChart")?.getContext("2d");
   if (!ctx) return;
 
-  // Destroy previous chart instance to prevent memory leak
-  if (state.chartInstance) {
-    state.chartInstance.destroy();
-    state.chartInstance = null;
-  }
-
-  state.chartInstance = new Chart(ctx, {
+  new Chart(ctx, {
     type: "doughnut",
     data: {
       labels: ["Pending", "Disetujui", "Dikembalikan", "Draft"],
@@ -535,9 +395,6 @@ function renderUserManagement(container) {
                     <button class="btn btn-accent" onclick="exportUsers()">
                         <i class="fas fa-file-export"></i> Ekspor
                     </button>
-                    <button class="btn btn-info" onclick="downloadUserTemplate()">
-                        <i class="fas fa-file-csv"></i> Unduh Template
-                    </button>
                     <button class="btn btn-success" onclick="triggerImport()">
                         <i class="fas fa-file-import"></i> Impor
                     </button>
@@ -558,13 +415,8 @@ function renderUserManagement(container) {
                     <tbody id="user-table-body"><tr><td colspan="5" style="text-align:center; padding:40px;">Memuat data...</td></tr></tbody>
                 </table>
             </div>
-            <div id="user-pagination"></div>
         </div>
     `;
-  // Enter key trigger search
-  document.getElementById("u-search")?.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") loadUsers();
-  });
   loadUsers();
 }
 
@@ -572,23 +424,9 @@ async function loadUsers() {
   try {
     let users = await api("getUsers");
     if (!Array.isArray(users)) users = [];
-
-    // Apply search filter
-    const searchQuery =
-      document.getElementById("u-search")?.value.toLowerCase() || "";
-    if (searchQuery) {
-      users = users.filter(
-        (u) =>
-          (u.name || "").toLowerCase().includes(searchQuery) ||
-          (u.username || "").toLowerCase().includes(searchQuery) ||
-          (u.nip_nim || "").toLowerCase().includes(searchQuery),
-      );
-    }
-
-    const pg = paginateData(users, 'users');
     const tbody = document.getElementById("user-table-body");
     tbody.innerHTML =
-      pg.items
+      users
         .map(
           (u) => `
             <tr>
@@ -607,7 +445,6 @@ async function loadUsers() {
         )
         .join("") ||
       '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Belum ada user terdaftar.</td></tr>';
-    renderPagination('user-pagination', 'users', users.length, pg, 'loadUsers()');
   } catch (e) {
     document.getElementById("user-table-body").innerHTML =
       '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--danger)">Gagal memuat data user.</td></tr>';
@@ -686,13 +523,6 @@ async function exportUsers() {
 function triggerImport() {
   document.getElementById("csv-import-input").click();
 }
-
-function downloadUserTemplate() {
-  const headers = "name,username,password,role,nip_nim";
-  const exampleRow = "Budi Santoso,budi123,password123,mahasiswa,123456789";
-  const csvContent = headers + "\n" + exampleRow;
-  downloadFile(csvContent, "template_import_user.csv", "text/csv");
-}
 async function handleImport(input) {
   const file = input.files[0];
   if (!file) return;
@@ -719,94 +549,89 @@ async function handleImport(input) {
   reader.readAsText(file);
 }
 
-// --- STAFF MANAGEMENT (MERGED) ---
+// --- STAFF MANAGEMENT ---
 function renderStaffManagement(container) {
   container.innerHTML = `
-        <div class="card">
-            <div class="card-header">
-                <h3><i class="fas fa-user-tie"></i> Data Penguji & Pembimbing</h3>
-                <div style="display:flex; gap:12px; align-items:center;">
-                    <button class="btn btn-primary" onclick="openStaffForm()"><i class="fas fa-plus"></i> Tambah</button>
-                    <button class="btn btn-info" onclick="downloadStaffTemplate()"><i class="fas fa-file-csv"></i> Unduh Template</button>
-                    <button class="btn btn-success" onclick="triggerStaffImport()"><i class="fas fa-file-import"></i> Impor</button>
-                    <input type="file" id="csv-staff-import" style="display:none" accept=".csv" onchange="handleStaffImport(this)">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-user-tie"></i> Data Penguji</h3>
+                    <button class="btn btn-primary" onclick="openStaffForm('Examiners')">
+                        <i class="fas fa-plus"></i> Tambah
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table id="table-examiners">
+                        <thead>
+                            <tr>
+                                <th>Nama Lengkap & Gelar</th>
+                                <th>NIP</th>
+                                <th class="td-actions">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nama Lengkap & Gelar</th>
-                            <th>NIP</th>
-                            <th>Jabatan</th>
-                            <th class="td-actions">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody id="staff-table-body"><tr><td colspan="4" style="text-align:center; padding:40px;">Memuat data...</td></tr></tbody>
-                </table>
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-chalkboard-teacher"></i> Data Pembimbing</h3>
+                    <button class="btn btn-primary" onclick="openStaffForm('Supervisors')">
+                        <i class="fas fa-plus"></i> Tambah
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table id="table-supervisors">
+                        <thead>
+                            <tr>
+                                <th>Nama Lengkap & Gelar</th>
+                                <th>NIP</th>
+                                <th class="td-actions">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
-            <div id="staff-pagination"></div>
         </div>
     `;
   loadStaff();
 }
 
 async function loadStaff() {
-  try {
-    let staffList = await api("getStaff");
-    if (!Array.isArray(staffList)) staffList = [];
-    const tbody = document.getElementById("staff-table-body");
-    if (!tbody) return;
-    const pg = paginateData(staffList, 'staff');
-    tbody.innerHTML =
-      pg.items
+  const result = await api("getStaff");
+  const render = (data, elementId, type) => {
+    const table = document.querySelector(`#${elementId} tbody`);
+    if (!table) return;
+    table.innerHTML =
+      data
         .map(
           (s) => `
             <tr>
                 <td style="font-weight:700; color:var(--text-main)">${s.name}</td>
                 <td style="color:var(--text-muted); font-family:monospace; font-weight:600">${s.nip || "-"}</td>
-                <td><span class="badge ${s.jabatan === 'Penguji' ? 'badge-approved' : 'badge-pending'}">${s.jabatan || "-"}</span></td>
                 <td class="td-actions">
-                    <div style="display:flex; justify-content:flex-end; gap:6px;">
-                        <button class="btn btn-icon" title="Edit" onclick="editStaff('${s.id}')"><i class="fas fa-edit" style="color:var(--primary)"></i></button>
-                        <button class="btn btn-icon danger" title="Hapus" onclick="deleteStaff('${s.id}')"><i class="fas fa-trash-alt" style="color:var(--danger)"></i></button>
-                    </div>
+                    <button class="btn btn-icon danger" title="Hapus" onclick="deleteStaff('${type}', '${s.id}')">
+                        <i class="fas fa-trash-alt" style="color:var(--danger)"></i>
+                    </button>
                 </td>
             </tr>
         `,
         )
         .join("") ||
-      '<tr><td colspan="4" style="text-align:center; padding: 30px; color:var(--text-muted)">Belum ada data.</td></tr>';
-    renderPagination('staff-pagination', 'staff', staffList.length, pg, 'loadStaff()');
-  } catch (e) {
-    showToast("Gagal memuat data staff", "error");
-  }
+      '<tr><td colspan="3" style="text-align:center; padding: 30px; color:var(--text-muted)">Belum ada data.</td></tr>';
+  };
+  render(result.examiners || [], "table-examiners", "Examiners");
+  render(result.supervisors || [], "table-supervisors", "Supervisors");
 }
 
-function openStaffForm(editId = null) {
-  let existing = null;
-  if (editId) {
-    // Find from cache
-    Object.keys(state.cache).forEach((key) => {
-      if (key.startsWith("getStaff") && state.cache[key].data) {
-        const found = (Array.isArray(state.cache[key].data) ? state.cache[key].data : []).find((s) => s.id == editId);
-        if (found) existing = found;
-      }
-    });
-  }
+function openStaffForm(type) {
   showModal(
-    existing ? "Edit Staff" : "Tambah Penguji / Pembimbing",
+    type === "Examiners" ? "Tambah Penguji" : "Tambah Pembimbing",
     `
         <form id="staff-form">
-            <div class="form-group"><label>Nama Lengkap & Gelar</label><input id="s_name" class="form-input" value="${existing?.name || ''}" required></div>
-            <div class="form-group"><label>NIP</label><input id="s_nip" class="form-input" value="${existing?.nip || ''}" required></div>
-            <div class="form-group"><label>Jabatan</label>
-              <select id="s_jabatan" class="form-input" required>
-                <option value="">-- Pilih Jabatan --</option>
-                <option value="Penguji" ${existing?.jabatan === 'Penguji' ? 'selected' : ''}>Penguji</option>
-                <option value="Pembimbing" ${existing?.jabatan === 'Pembimbing' ? 'selected' : ''}>Pembimbing</option>
-              </select>
-            </div>
+            <div class="form-group"><label>Nama</label><input id="s_name" class="form-input" required></div>
+            <div class="form-group"><label>NIP</label><input id="s_nip" class="form-input" required></div>
              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
                 <button type="submit" class="btn btn-primary">Simpan Data</button>
@@ -817,11 +642,10 @@ function openStaffForm(editId = null) {
   document.getElementById("staff-form").onsubmit = async (e) => {
     e.preventDefault();
     await api("upsertStaff", {
+      type,
       data: {
-        id: editId || undefined,
         name: document.getElementById("s_name").value,
         nip: document.getElementById("s_nip").value,
-        jabatan: document.getElementById("s_jabatan").value,
       },
     });
     showToast("Berhasil");
@@ -830,63 +654,11 @@ function openStaffForm(editId = null) {
   };
 }
 
-function editStaff(id) {
-  openStaffForm(id);
-}
-
-async function deleteStaff(id) {
+async function deleteStaff(type, id) {
   if (confirm("Hapus staff ini?")) {
-    await api("deleteStaff", { id });
-    showToast("Staff dihapus");
+    await api("deleteStaff", { type, id });
     loadStaff();
   }
-}
-
-function triggerStaffImport() {
-  document.getElementById("csv-staff-import").click();
-}
-
-function downloadStaffTemplate() {
-  const headers = "name,nip,jabatan";
-  const exampleRow = "Dr. Andi Santoso M.T,198001012005011001,Penguji\nProf. Budi Darmawan,197502022000031002,Pembimbing";
-  const csvContent = headers + "\n" + exampleRow;
-  downloadFile(csvContent, "template_import_staff.csv", "text/csv");
-}
-
-async function handleStaffImport(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const lines = e.target.result.split("\n");
-    const headers = lines[0].split(",").map((h) => h.trim());
-    const dataArray = lines
-      .slice(1)
-      .filter((l) => l.trim())
-      .map((line) => {
-        const values = line
-          .split(/[;,]/)
-          .map((v) => v.trim().replace(/^"|"$/g, ""));
-        let obj = {
-          name: values[0] || "",
-          nip: values[1] || "",
-          jabatan: values[2] || ""
-        };
-        // Validasi jabatan
-        if (obj.jabatan !== "Penguji" && obj.jabatan !== "Pembimbing") {
-           obj.jabatan = "Penguji"; // fallback default
-        }
-        return obj;
-      });
-    await api("bulkUpsertStaff", { dataArray });
-    // Force a small delay to ensure Google Sheets API finishes writing before reloading
-    setTimeout(() => {
-        showToast(`${dataArray.length} data staff diimport`);
-        loadStaff();
-    }, 1000);
-    input.value = "";
-  };
-  reader.readAsText(file);
 }
 
 // --- LOCATION MANAGEMENT (FIXED & ADDED) ---
@@ -1017,37 +789,33 @@ function renderStudentLetters(container) {
                     <tbody id="student-letters-body"><tr><td colspan="5" style="text-align:center; padding: 40px;">Memuat data surat...</td></tr></tbody>
                 </table>
             </div>
-            <div id="student-pagination"></div>
         </div>
     `;
   loadStudentData();
 }
 
 async function loadStudentData() {
-  try {
-    let letters = await api("getLetters", {
-      role: "mahasiswa",
-      userId: state.user.id,
-    });
-    if (!Array.isArray(letters)) letters = [];
-    const tbody = document.getElementById("student-letters-body");
+  let letters = await api("getLetters", {
+    role: "mahasiswa",
+    userId: state.user.id,
+  });
+  if (!Array.isArray(letters)) letters = [];
+  const tbody = document.getElementById("student-letters-body");
 
-    const getBadge = (s) => {
-      const map = {
-        Draft: "badge-pending",
-        Pending: "badge-pending",
-        Approved: "badge-approved",
-        Returned: "badge-rejected",
-      };
-      return `<span class="badge ${map[s] || "badge-pending"}">${s}</span>`;
+  const getBadge = (s) => {
+    const map = {
+      Draft: "badge-pending",
+      Pending: "badge-pending",
+      Approved: "badge-approved",
+      Returned: "badge-rejected",
     };
+    return `<span class="badge ${map[s] || "badge-pending"}">${s}</span>`;
+  };
 
-    const pg = paginateData(letters, 'student-letters');
-
-    tbody.innerHTML =
-      pg.items
-        .map(
-          (l) => `
+  tbody.innerHTML =
+    letters
+      .map(
+        (l) => `
         <tr style="font-size: 0.9rem;">
             <td><span class="badge ${l.status === "Approved" ? "badge-approved" : l.status === "Returned" ? "badge-rejected" : "badge-pending"}" style="font-size:0.75rem">${l.letter_type}</span></td>
             <td style="max-width:250px;">
@@ -1084,13 +852,9 @@ async function loadStudentData() {
             </td>
         </tr>
     `,
-        )
-        .join("") ||
-      '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Belum ada surat yang diajukan.</td></tr>';
-    renderPagination('student-pagination', 'student-letters', letters.length, pg, 'loadStudentData()');
-  } catch (e) {
-    showToast("Gagal memuat data surat", "error");
-  }
+      )
+      .join("") ||
+    '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Belum ada surat yang diajukan.</td></tr>';
 }
 
 async function openLetterForm(id = null) {
@@ -1109,15 +873,18 @@ async function openLetterForm(id = null) {
     });
   }
 
-  const staffList = Array.isArray(staff) ? staff : [];
-  
-  const staffOptions1 = staffList.map(
-    (s) => `<option value="${s.name}" ${existing && existing.examiner_name === s.name ? "selected" : ""}>${s.name} (${s.jabatan})</option>`
-  ).join("");
-
-  const staffOptions2 = staffList.map(
-    (s) => `<option value="${s.name}" ${existing && existing.supervisor_name === s.name ? "selected" : ""}>${s.name} (${s.jabatan})</option>`
-  ).join("");
+  const examiners = (staff.examiners || [])
+    .map(
+      (s) =>
+        `<option value="${s.name}" ${existing && existing.examiner_name === s.name ? "selected" : ""}>${s.name}</option>`,
+    )
+    .join("");
+  const supervisors = (staff.supervisors || [])
+    .map(
+      (s) =>
+        `<option value="${s.name}" ${existing && existing.supervisor_name === s.name ? "selected" : ""}>${s.name}</option>`,
+    )
+    .join("");
   const locations = (locs || [])
     .map(
       (l) =>
@@ -1159,17 +926,11 @@ async function openLetterForm(id = null) {
             </div>
             <div class="form-group">
                 <label><i class="fas fa-user-tie"></i> Penguji 1</label>
-                <select id="examiner_1" class="form-input" style="width:100%">
-                    <option value="">-- Pilih Penguji 1 --</option>
-                    ${staffOptions1}
-                </select>
+                <select id="examiner_1" class="form-input" style="width:100%">${examiners}</select>
             </div>
             <div class="form-group">
-                <label><i class="fas fa-user-tie"></i> Penguji 2</label>
-                <select id="examiner_2" class="form-input" style="width:100%">
-                    <option value="">-- Pilih Penguji 2 --</option>
-                    ${staffOptions2}
-                </select>
+                <label><i class="fas fa-user-graduate"></i> Penguji 2 (Pembimbing)</label>
+                <select id="examiner_2" class="form-input" style="width:100%">${supervisors}</select>
             </div>
             <div class="span-2" style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1183,19 +944,6 @@ async function openLetterForm(id = null) {
 
   document.getElementById("letter-form").onsubmit = async (e) => {
     e.preventDefault();
-    const examiner1 = document.getElementById("examiner_1").value;
-    const examiner2 = document.getElementById("examiner_2").value;
-    
-    if (!examiner1 || !examiner2) {
-        showToast("Pilih Penguji 1 dan Penguji 2!", "error");
-        return;
-    }
-    
-    if (examiner1 === examiner2) {
-        showToast("Penguji 1 dan Penguji 2 tidak boleh sama!", "error");
-        return;
-    }
-
     const data = {
       id: id || null,
       letter_type: document.getElementById("letter_type").value,
@@ -1204,8 +952,8 @@ async function openLetterForm(id = null) {
       exam_time: document.getElementById("exam_time").value,
       exam_time_end: document.getElementById("exam_time_end").value,
       exam_location: document.getElementById("exam_location").value,
-      examiner_name: examiner1,
-      supervisor_name: examiner2,
+      examiner_name: document.getElementById("examiner_1").value,
+      supervisor_name: document.getElementById("examiner_2").value,
       student_id: state.user.id,
       student_name: state.user.name,
       student_nim: state.user.nip_nim,
@@ -1219,28 +967,16 @@ async function openLetterForm(id = null) {
 
 async function ajukanSurat(id) {
   if (confirm("Ajukan surat ini ke admin?")) {
-    try {
-      await api("updateLetterStatus", {
-        id,
-        status: "Pending",
-        updateData: {},
-      });
-      showToast("Surat diajukan");
-      loadStudentData();
-    } catch (e) {
-      showToast("Gagal mengajukan surat", "error");
-    }
+    await api("updateLetterStatus", { id, status: "Pending", updateData: {} });
+    showToast("Surat diajukan");
+    loadStudentData();
   }
 }
 async function batalkanSurat(id) {
   if (confirm("Hapus draft ini?")) {
-    try {
-      await api("deleteLetter", { id });
-      showToast("Dihapus");
-      loadStudentData();
-    } catch (e) {
-      showToast("Gagal menghapus draft", "error");
-    }
+    await api("deleteLetter", { id });
+    showToast("Dihapus");
+    loadStudentData();
   }
 }
 
@@ -1274,7 +1010,6 @@ function renderValidationQueue(container) {
                     <tbody id="validation-table-body"><tr><td colspan="7" style="text-align:center; padding:40px;">Memuat antrean...</td></tr></tbody>
                 </table>
             </div>
-            <div id="validation-pagination"></div>
         </div>
     `;
 
@@ -1304,10 +1039,8 @@ async function loadValidationQueue() {
   const tbody = document.getElementById("validation-table-body");
   if (!tbody) return;
 
-  const pg = paginateData(filtered, 'validation');
-
   tbody.innerHTML =
-    pg.items
+    filtered
       .map(
         (l) => `
         <tr>
@@ -1345,8 +1078,7 @@ async function loadValidationQueue() {
     `,
       )
       .join("") ||
-    '<tr><td colspan="7" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
-  renderPagination('validation-pagination', 'validation', filtered.length, pg, 'loadValidationQueue()');
+    '<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
 }
 
 // --- ARCHIVE (APPROVED ONLY) ---
@@ -1375,7 +1107,6 @@ function renderArchive(container) {
                     <tbody id="archive-table-body"><tr><td colspan="5" style="text-align:center; padding:40px;">Memuat arsip...</td></tr></tbody>
                 </table>
             </div>
-            <div id="archive-pagination"></div>
         </div>
     `;
 
@@ -1405,10 +1136,8 @@ async function loadArchive() {
   const tbody = document.getElementById("archive-table-body");
   if (!tbody) return;
 
-  const pg = paginateData(filtered, 'archive');
-
   tbody.innerHTML =
-    pg.items
+    filtered
       .map(
         (l) => `
         <tr>
@@ -1436,104 +1165,6 @@ async function loadArchive() {
       )
       .join("") ||
     '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Arsip kosong atau tidak ditemukan.</td></tr>';
-  renderPagination('archive-pagination', 'archive', filtered.length, pg, 'loadArchive()');
-}
-
-// --- STAFF ARCHIVE (PENGUJI/PEMBIMBING VIEW) ---
-function renderStaffArchive(container) {
-  container.innerHTML = `
-        <div class="card">
-            <div class="card-header">
-                <h3><i class="fas fa-archive"></i> Surat yang Ditujukan ke Saya</h3>
-                <div class="search-container">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="sa-search" placeholder="Cari nama mahasiswa atau judul..." autocomplete="off">
-                    <button class="btn-search" onclick="loadStaffArchive()">Cari</button>
-                </div>
-            </div>
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>No Surat</th>
-                            <th>Mahasiswa</th>
-                            <th>Judul</th>
-                            <th>Peran Saya</th>
-                            <th>Waktu Ujian</th>
-                            <th class="td-actions">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody id="staff-archive-body"><tr><td colspan="6" style="text-align:center; padding:40px;">Memuat arsip surat...</td></tr></tbody>
-                </table>
-            </div>
-            <div id="staff-archive-pagination"></div>
-        </div>
-    `;
-  document.getElementById("sa-search")?.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") loadStaffArchive();
-  });
-  loadStaffArchive();
-}
-
-async function loadStaffArchive() {
-  try {
-    const searchQuery = document.getElementById("sa-search")?.value.toLowerCase() || "";
-    let letters = await api("getLetters", { role: "staff", userId: state.user.id });
-    if (!Array.isArray(letters)) letters = [];
-
-    const filtered = letters.filter((l) => {
-      if (!searchQuery) return true;
-      return (
-        (l.student_name || "").toLowerCase().includes(searchQuery) ||
-        (l.student_nim || "").toLowerCase().includes(searchQuery) ||
-        (l.proposal_title || "").toLowerCase().includes(searchQuery) ||
-        (l.letter_number || "").toLowerCase().includes(searchQuery)
-      );
-    });
-
-    const tbody = document.getElementById("staff-archive-body");
-    if (!tbody) return;
-
-    const pg = paginateData(filtered, 'staff-archive');
-    const myName = state.user.name;
-
-    tbody.innerHTML =
-      pg.items
-        .map(
-          (l) => {
-            const role = l.examiner_name === myName ? "Penguji" : "Pembimbing";
-            return `
-        <tr>
-            <td style="font-weight:700; color:var(--primary)">${l.letter_number || "-"}</td>
-            <td>
-                <div style="font-weight:700">${l.student_name}</div>
-                <div style="font-size:0.75rem; color:var(--text-muted)">${l.student_nim}</div>
-            </td>
-            <td style="max-width:250px">
-                <div style="font-weight:600; font-size:0.85rem">${l.letter_type}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px">${l.proposal_title}</div>
-            </td>
-            <td><span class="badge ${role === 'Penguji' ? 'badge-approved' : 'badge-pending'}">${role}</span></td>
-            <td>
-                <div style="font-size:0.85rem; font-weight:600"><i class="far fa-calendar-alt" style="color:var(--primary)"></i> ${formatDateID(l.exam_date)}</div>
-                <div style="font-size:0.8rem; color:var(--text-muted)"><i class="far fa-clock"></i> ${formatTimeID(l.exam_time)}</div>
-            </td>
-            <td class="td-actions">
-                <div style="display:flex; justify-content:flex-end; gap:8px;">
-                    <button class="btn btn-icon" title="Preview" onclick="previewLetter('${l.id}')"><i class="fas fa-eye" style="color:var(--primary)"></i></button>
-                    <button class="btn btn-icon" title="Cetak" onclick="printLetter('${l.id}')"><i class="fas fa-print" style="color:var(--secondary)"></i></button>
-                    <button class="btn btn-icon" title="PDF" onclick="downloadPDF('${l.id}')"><i class="fas fa-file-pdf" style="color:var(--danger)"></i></button>
-                </div>
-            </td>
-        </tr>`;
-          },
-        )
-        .join("") ||
-      '<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--text-muted)">Belum ada surat yang ditujukan ke Anda.</td></tr>';
-    renderPagination('staff-archive-pagination', 'staff-archive', filtered.length, pg, 'loadStaffArchive()');
-  } catch (e) {
-    showToast("Gagal memuat arsip surat", "error");
-  }
 }
 
 function revealTitle(id) {
@@ -1578,7 +1209,7 @@ async function approveLetter(id) {
     `
         <form id="approve-form">
             <div class="form-group"><label>Nomor Surat</label>
-            <div style="display:flex"><span style="padding:10px;background:#eee">PP.06.02/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
+            <div style="display:flex"><span style="padding:10px;background:#eee">KP.03.04/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
             </div>
             <div style="margin-top:20px; text-align:right">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1591,7 +1222,7 @@ async function approveLetter(id) {
     e.preventDefault();
     const updateData = {
       letter_number:
-        "PP.06.02/F.XXIX.19.4/" + document.getElementById("a_num").value,
+        "KP.03.04/F.XXIX.19.4/" + document.getElementById("a_num").value,
       signatory_position: settings.signatory_position,
       signatory_name: settings.signatory_name,
       signatory_nip: settings.signatory_nip,
@@ -1872,7 +1503,8 @@ async function renderSignatorySettings(container) {
 
 // --- PREVIEW & PRINT ---
 function buildLetterHTML(l, forPrint = false) {
-  const d = new Date(l.exam_date || Date.now());
+  const dExam = new Date(l.exam_date || Date.now());
+  const dLetter = new Date(l.approval_date || l.submission_date || Date.now());
   const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const months = [
     "Januari",
@@ -1888,8 +1520,10 @@ function buildLetterHTML(l, forPrint = false) {
     "November",
     "Desember",
   ];
-  const dateStr = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-  const dayName = days[d.getDay()];
+
+  const letterDateStr = `${dLetter.getDate()} ${months[dLetter.getMonth()]} ${dLetter.getFullYear()}`;
+  const examDateStr = `${dExam.getDate()} ${months[dExam.getMonth()]} ${dExam.getFullYear()}`;
+  const examDayName = days[dExam.getDay()];
 
   const kopUrl = new URL("assets/kop.png", window.location.href).href;
   const ttdUrl = new URL("assets/ttd.png", window.location.href).href;
@@ -1906,20 +1540,17 @@ function buildLetterHTML(l, forPrint = false) {
   };
 
   return `
-    <style>
-      .letter-pdf-table td { border: none !important; padding: 2px 0 !important; background: transparent !important; }
-    </style>
-    <div style="font-family:'Times New Roman', serif; line-height: 1.6; color: black; padding: 0 20px;">
-        <div style="text-align:center;margin-bottom:15px">
+    <div style="font-family:'Times New Roman', serif; line-height: 1.6; color: black; padding: 20px;">
+        <div style="text-align:center;margin-bottom:20px">
             <img src="${kopUrl}" onerror="this.style.display='none'" style="width:100%;max-width:700px">
         </div>
         
-        <table class="letter-pdf-table" style="width:100%; margin-bottom: 15px;">
+        <table style="width:100%; margin-bottom: 20px;">
             <tr>
                 <td style="width:80px">Nomor</td>
                 <td style="width:10px">:</td>
                 <td>${l.letter_number || "......."}</td>
-                <td style="text-align:right">${dateStr}</td>
+                <td style="text-align:right">${letterDateStr}</td>
             </tr>
             <tr>
                 <td>Perihal</td>
@@ -1928,15 +1559,11 @@ function buildLetterHTML(l, forPrint = false) {
             </tr>
         </table>
 
-        <div style="margin-bottom: 16px;">
-            Yth.<br>
-            1. ${l.examiner_name} (Penguji 1)<br>
-            2. ${l.supervisor_name} (Penguji 2)
-        </div>
+        <p>Yth. <br>1. ${l.examiner_name} (Penguji I)<br>2. ${l.supervisor_name} (Penguji II)</p>
         
-        <p>Dengan hormat,<br>Sesuai perihal diatas, bersama ini kami mengundang Bapak/Ibu untuk menguji dalam <i>${l.letter_type.replace(/^Surat\s+/i, '')}</i> mahasiswa a.n :</p>
+        <p>Dengan hormat,<br>Bersama ini kami mengundang Bapak/Ibu untuk menguji mahasiswa:</p>
         
-        <table class="letter-pdf-table" style="margin-left:30px; margin-bottom: 10px; width: calc(100% - 30px); border-collapse: collapse;">
+        <table style="margin-left:30px; margin-bottom: 15px; width: calc(100% - 30px); border-collapse: collapse;">
             <tr>
                 <td style="width:100px; vertical-align: top;">Nama</td>
                 <td style="width:15px; vertical-align: top;">:</td>
@@ -1955,11 +1582,11 @@ function buildLetterHTML(l, forPrint = false) {
         </table>
         
         <p>Pada:</p>
-        <table class="letter-pdf-table" style="margin-left:30px; margin-bottom: 15px; border-collapse: collapse;">
+        <table style="margin-left:30px; margin-bottom: 20px; border-collapse: collapse;">
             <tr>
                 <td style="width:100px;">Hari/Tgl</td>
                 <td style="width:15px;">:</td>
-                <td>${dayName}, ${dateStr}</td>
+                <td>${examDayName}, ${examDateStr}</td>
             </tr>
             <tr>
                 <td>Jam</td>
@@ -1973,11 +1600,9 @@ function buildLetterHTML(l, forPrint = false) {
             </tr>
         </table>
 
-        <p>Atas perhatian dan kerja sama yang baik disampaikan terima kasih.</p>
-
-        <div style="margin-top:20px; margin-left:auto; width:300px; text-align:center; page-break-inside: avoid;">
+        <div style="margin-top:40px; margin-left:auto; width:300px; text-align:center">
             <p>${l.signatory_position || ""}</p>
-            ${l.status === "Approved" ? `<img src="${ttdUrl}" style="height:80px; margin: 5px 0;">` : "<br><br><br><br><br><br><br><br><br><br>"}
+            ${l.status === "Approved" ? `<img src="${ttdUrl}" style="height:100px; margin: 5px 0;">` : "<br><br><br><br><br><br><br><br><br><br>"}
             <p style="text-decoration:underline; font-weight:bold; margin-bottom: 0;">${l.signatory_name || "................"}</p>
             <p style="margin-top: 0;">NIP. ${l.signatory_nip || "................"}</p>
         </div>
@@ -1990,117 +1615,11 @@ async function previewLetter(id) {
     userId: state.user.id,
   });
   const l = letters.find((lt) => lt.id == id);
-  if (!l) return showToast("Surat tidak ditemukan", "error");
-
-  const win = window.open("", "_blank");
-  if (!win) {
-    // Fallback to modal if popup blocked
-    showModal("Preview", `<div style="border:1px solid #ccc;padding:10px;height:60vh;overflow:auto;background:white">${buildLetterHTML(l)}</div>`);
-    return;
-  }
-
-  const watermark = l.status !== 'Approved' ? `
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);
-      font-size:120px;font-weight:900;color:rgba(0,0,0,0.04);pointer-events:none;z-index:0;
-      text-transform:uppercase;letter-spacing:20px">${l.status}</div>` : '';
-
-  win.document.write(`<!DOCTYPE html>
-  <html><head>
-    <title>Preview Surat - ${l.student_name}</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
-    <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { background:#e2e8f0; font-family:'Segoe UI',sans-serif; }
-      .toolbar {
-        position:sticky;top:0;z-index:100;background:#1e293b;color:#fff;
-        display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 24px;
-        box-shadow:0 2px 10px rgba(0,0,0,0.2);
-      }
-      .toolbar button {
-        display:inline-flex;align-items:center;gap:8px;padding:8px 20px;
-        border:none;border-radius:8px;font-weight:700;font-size:0.85rem;
-        cursor:pointer;transition:all 0.2s;
-      }
-      .btn-print { background:#6366f1;color:#fff; }
-      .btn-print:hover { background:#4f46e5; }
-      .btn-pdf { background:#ef4444;color:#fff; }
-      .btn-pdf:hover { background:#dc2626; }
-      .btn-close { background:#475569;color:#fff; }
-      .btn-close:hover { background:#334155; }
-      .page-container {
-        width:210mm;min-height:297mm;margin:24px auto;background:#fff;
-        box-shadow:0 4px 20px rgba(0,0,0,0.15);position:relative;overflow:hidden;
-        padding:15mm 20mm;
-      }
-      @media print {
-        .toolbar { display:none !important; }
-        body { background:#fff; }
-        .page-container { box-shadow:none;margin:0;width:100%;padding:10mm 15mm; }
-      }
-    </style>
-  </head><body>
-    <div class="toolbar">
-      <button class="btn-print" onclick="window.print()"><i class="fas fa-print"></i> Cetak</button>
-      <button class="btn-pdf" onclick="savePDF()"><i class="fas fa-file-pdf"></i> Download PDF</button>
-      <button class="btn-close" onclick="window.close()"><i class="fas fa-times"></i> Tutup</button>
-    </div>
-    ${watermark}
-    <div class="page-container" id="letter-content">
-      ${buildLetterHTML(l, true)}
-    </div>
-    <script>
-      function savePDF() {
-        const el = document.getElementById('letter-content');
-        html2pdf().set({
-          margin: [10,10,10,10],
-          filename: 'Surat_${l.student_nim}_${l.letter_type.replace(/\\s+/g,'_')}.pdf',
-          image: { type:'jpeg', quality:0.98 },
-          html2canvas: { scale:2, useCORS:true },
-          jsPDF: { unit:'mm', format:'a4', orientation:'portrait' }
-        }).from(el).save();
-      }
-    <\/script>
-  </body></html>`);
-  win.document.close();
-}
-
-async function downloadPDF(id) {
-  let letters = await api("getLetters", {
-    role: state.user.role === "mahasiswa" ? "mahasiswa" : "admin",
-    userId: state.user.id,
-  });
-  const l = letters.find((lt) => lt.id == id);
-  if (!l) return showToast("Surat tidak ditemukan", "error");
-
-  if (typeof html2pdf === 'undefined') {
-    showToast("Memuat library PDF...", "error");
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.onload = () => downloadPDF(id);
-    document.head.appendChild(script);
-    return;
-  }
-
-  showToast("Membuat PDF...");
-  const htmlContent = `
-    <div style="width:210mm; background:#fff; padding:15mm 20mm;">
-        ${buildLetterHTML(l, true)}
-    </div>
-  `;
-
-  try {
-    await html2pdf().set({
-      margin: [10, 10, 10, 10],
-      filename: `Surat_${l.student_nim}_${l.letter_type.replace(/\s+/g, '_')}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    }).from(htmlContent).save();
-    showToast("PDF berhasil diunduh");
-  } catch (e) {
-    showToast("Gagal membuat PDF", "error");
-  }
+  if (!l) return;
+  showModal(
+    "Preview",
+    `<div style="border:1px solid #ccc;padding:10px;height:60vh;overflow:auto;background:white">${buildLetterHTML(l)}</div>`,
+  );
 }
 
 async function printLetter(id) {
@@ -2109,9 +1628,7 @@ async function printLetter(id) {
     userId: state.user.id,
   });
   const l = letters.find((lt) => lt.id == id);
-  if (!l) return showToast("Surat tidak ditemukan", "error");
   const win = window.open("", "_blank");
-  if (!win) return showToast("Popup diblokir browser", "error");
   win.document.write(
     `<html><body onload="window.print()">${buildLetterHTML(l, true)}</body></html>`,
   );
@@ -2145,7 +1662,6 @@ function downloadFile(content, fileName, mimeType) {
   a.href = url;
   a.download = fileName;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // --- INITIALIZATION ---
@@ -2157,8 +1673,6 @@ document.getElementById("login-form").onsubmit = async (e) => {
       password: document.getElementById("password").value,
     });
     state.user = res.user;
-    // Persist session to localStorage
-    try { localStorage.setItem('esurat_session', JSON.stringify(state.user)); } catch(e) {}
     document.getElementById("user-display-name").innerText = state.user.name;
     document.getElementById("user-display-role").innerText = state.user.role;
     // Removed avatar initial setting
@@ -2173,13 +1687,6 @@ document.getElementById("close-modal").onclick = closeModal;
 
 document.getElementById("btn-logout").onclick = () => {
   state.user = null;
-  state.cache = {};
-  if (state.chartInstance) {
-    state.chartInstance.destroy();
-    state.chartInstance = null;
-  }
-  // Clear persisted session
-  try { localStorage.removeItem('esurat_session'); localStorage.removeItem('esurat_view'); } catch(e) {}
   switchScreen("login-screen");
   document.getElementById("login-form").reset();
 };
@@ -2203,25 +1710,4 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// --- SESSION RESTORE ---
-// Try to restore session from localStorage
-(function restoreSession() {
-  try {
-    const saved = localStorage.getItem('esurat_session');
-    if (saved) {
-      const user = JSON.parse(saved);
-      if (user && user.id && user.role) {
-        state.user = user;
-        document.getElementById("user-display-name").innerText = state.user.name;
-        document.getElementById("user-display-role").innerText = state.user.role;
-        switchScreen("dashboard-screen");
-        const savedView = localStorage.getItem('esurat_view') || 'dashboard';
-        navigateTo(savedView);
-        return;
-      }
-    }
-  } catch(e) {
-    console.warn('Session restore failed:', e);
-  }
-  switchScreen("login-screen");
-})();
+switchScreen("login-screen");
