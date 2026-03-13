@@ -59,13 +59,14 @@ function doPost(e) {
       case "getDashboardStats":
         return JSON_RESPONSE(getDashboardStats());
       case "getStaff":
-        return JSON_RESPONSE(getData("Staff"));
+        return JSON_RESPONSE({
+          examiners: getData("Examiners"),
+          supervisors: getData("Supervisors"),
+        });
       case "upsertStaff":
-        return JSON_RESPONSE(upsertData("Staff", params.data));
-      case "bulkUpsertStaff":
-        return JSON_RESPONSE(bulkUpsertData("Staff", params.dataArray));
+        return JSON_RESPONSE(upsertData(params.type, params.data));
       case "deleteStaff":
-        return JSON_RESPONSE(deleteData("Staff", params.id));
+        return JSON_RESPONSE(deleteData(params.type, params.id));
       case "getLocations":
         return JSON_RESPONSE(getData("Locations"));
       case "upsertLocation":
@@ -76,10 +77,6 @@ function doPost(e) {
         return JSON_RESPONSE(getSettings());
       case "saveSettings":
         return JSON_RESPONSE(saveSettings(params.data));
-      case "deleteLetter":
-        return JSON_RESPONSE(deleteData("Letters", params.id));
-      case "bulkUpsertUsers":
-        return JSON_RESPONSE(bulkUpsertData("Users", params.dataArray));
       case "bulkUpsert":
         return JSON_RESPONSE(
           bulkUpsertData(params.sheetName, params.dataArray),
@@ -138,17 +135,6 @@ function getData(sheetName) {
 }
 
 /**
- * Helpers
- */
-function getTrueLastRow(sheet) {
-  const data = sheet.getRange("A:A").getValues();
-  for (let i = data.length - 1; i >= 0; i--) {
-    if (data[i][0] && data[i][0].toString().trim() !== "") return i + 1;
-  }
-  return 1;
-}
-
-/**
  * Insert or Update Data
  */
 function upsertData(sheetName, data) {
@@ -170,8 +156,7 @@ function upsertData(sheetName, data) {
   if (rowIndex > -1) {
     sheet.getRange(rowIndex + 1, 1, 1, headers.length).setValues([values]);
   } else {
-    const lastRow = getTrueLastRow(sheet);
-    sheet.getRange(lastRow + 1, 1, 1, headers.length).setValues([values]);
+    sheet.appendRow(values);
   }
   return { success: true, id: data.id };
 }
@@ -198,30 +183,14 @@ function getLetters(role, userId) {
   let letters = getData("Letters");
   if (role === "mahasiswa") {
     letters = letters.filter((l) => l.student_id == userId);
-  } else if (role === "staff") {
-    // Staff only sees approved letters where they are examiner or supervisor
-    const users = getData("Users");
-    const staffUser = users.find((u) => u.id.toString() === userId.toString());
-    if (staffUser) {
-      letters = letters.filter(
-        (l) =>
-          l.status === "Approved" &&
-          ((l.examiner_name || "").includes(staffUser.name) ||
-            (l.supervisor_name || "").includes(staffUser.name)),
-      );
-    } else {
-      letters = [];
-    }
   }
   return letters.reverse(); // Terbaru di atas
 }
 
 function submitLetter(data) {
-  if (!data.id) {
-    data.id = new Date().getTime().toString();
-    data.status = "Draft";
-    data.submission_date = new Date().toISOString();
-  }
+  data.id = new Date().getTime().toString();
+  data.status = "Draft";
+  data.submission_date = new Date().toISOString();
   return upsertData("Letters", data);
 }
 
@@ -229,6 +198,11 @@ function updateLetterStatus(id, status, updateData) {
   const letters = getData("Letters");
   const letter = letters.find((l) => l.id.toString() === id.toString());
   if (!letter) throw new Error("Surat tidak ditemukan.");
+
+  // Otomatis isi tanggal approval jika disetujui
+  if (status === "Approved" && !updateData.approval_date) {
+    updateData.approval_date = new Date().toISOString();
+  }
 
   const updatedLetter = { ...letter, ...updateData, status };
   return upsertData("Letters", updatedLetter);
@@ -302,8 +276,10 @@ function setup() {
       "signatory_position",
       "signatory_nip",
       "rejection_notes",
+      "approval_date",
     ],
-    Staff: ["id", "name", "nip", "jabatan"],
+    Examiners: ["id", "name", "nip"],
+    Supervisors: ["id", "name", "nip"],
     Locations: ["id", "name"],
     Settings: ["key", "value"],
   };
@@ -331,28 +307,6 @@ function setup() {
 }
 
 function bulkUpsertData(sheetName, dataArray) {
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) throw new Error("Sheet tidak ditemukan: " + sheetName);
-  if (!Array.isArray(dataArray) || dataArray.length === 0)
-    return { success: true };
-
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const rows = [];
-
-  dataArray.forEach((item) => {
-    if (!item.id)
-      item.id =
-        new Date().getTime().toString() +
-        Math.random().toString(36).substr(2, 5);
-    const row = headers.map((h) => (item[h] !== undefined ? item[h] : ""));
-    rows.push(row);
-  });
-
-  const lastRow = getTrueLastRow(sheet);
-  sheet.getRange(lastRow + 1, 1, rows.length, headers.length).setValues(rows);
-  return { success: true, count: rows.length };
-}
-
-function bulkUpsertStaff(dataArray) {
-  return bulkUpsertData("Staff", dataArray);
+  dataArray.forEach((data) => upsertData(sheetName, data));
+  return { success: true, count: dataArray.length };
 }

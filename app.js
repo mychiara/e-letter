@@ -5,7 +5,7 @@
 
 // --- CONFIGURATION ---
 const GAS_WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbzPO7LEwZXy1BfdH6Pp1idCa3sd1l9pNnQBud2Ngax9WsqcSAJAMGsp4OJFhXaIuT21/exec";
+  "https://script.google.com/macros/s/AKfycbxvCLxehz-NSiVE_0Njo5rCFr2Z48hTA0bpQhm_sXQ_4qH0AMUpq0FaQjJ2kXXNQKNVjQ/exec";
 
 // --- STATE MANAGEMENT ---
 const state = {
@@ -134,8 +134,13 @@ function renderSidebar() {
     });
     items.push({
       id: "archive",
-      label: "Arsip Surat",
+      label: "Arsip Surat Undangan",
       icon: "fas fa-archive",
+    });
+    items.push({
+      id: "archive-research",
+      label: "Arsip Ijin Penelitian",
+      icon: "fas fa-folder-open",
     });
     items.push({
       id: "admin-report",
@@ -152,6 +157,11 @@ function renderSidebar() {
       id: "my-letters",
       label: "Surat Saya",
       icon: "fas fa-file-alt",
+    });
+    items.push({
+      id: "research-letters",
+      label: "Ijin Penelitian",
+      icon: "fas fa-microscope",
     });
   }
 
@@ -177,6 +187,7 @@ function renderSidebar() {
 
 function navigateTo(view) {
   state.currentView = view;
+  localStorage.setItem("currentView", view); // Save view to persistence
   renderSidebar();
   const titleMap = {
     dashboard: "Dashboard Overview",
@@ -184,8 +195,10 @@ function navigateTo(view) {
     "manage-staff": "Data Penguji & Pembimbing",
     "manage-locations": "Kelola Tempat Ujian",
     "validate-letters": "Antrean Validasi Surat",
-    archive: "Arsip Surat (Selesai)",
+    archive: "Arsip Surat Selesai (Undangan)",
+    "archive-research": "Arsip Ijin Penelitian (Selesai)",
     "my-letters": "Permohonan Surat Saya",
+    "research-letters": "Pengajuan Ijin Penelitian",
     "admin-report": "Laporan Statistik",
     "settings-signatory": "Pengaturan Penandatangan",
   };
@@ -215,8 +228,14 @@ function renderContent() {
     case "archive":
       renderArchive(container);
       break;
+    case "archive-research":
+      renderArchiveResearch(container);
+      break;
     case "my-letters":
       renderStudentLetters(container);
+      break;
+    case "research-letters":
+      renderResearchLetters(container);
       break;
     case "admin-report":
       renderAdminReport(container);
@@ -234,8 +253,14 @@ function renderContent() {
 async function renderDashboard(container) {
   let statsHtml = "";
   if (state.user.role === "super_admin" || state.user.role === "admin") {
-    const stats = await api("getDashboardStats");
+    const stats = await api("getDashboardStats", {}, true); // Force Refresh
     statsHtml = `
+      <div class="card-header" style="margin-bottom:20px; border-bottom:0; padding:0">
+          <h3><i class="fas fa-th-large"></i> Dashboard Stats</h3>
+          <button class="btn btn-icon" onclick="renderDashboard(document.getElementById('content-area'))" title="Refresh Data">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+      </div>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-icon blue"><i class="fas fa-clock"></i></div>
@@ -285,6 +310,12 @@ async function renderDashboard(container) {
     const approved = letters.filter((l) => l.status === "Approved").length;
 
     statsHtml = `
+      <div class="card-header" style="margin-bottom:20px; border-bottom:0; padding:0">
+          <h3><i class="fas fa-th-large"></i> Ringkasan Anda</h3>
+          <button class="btn btn-icon" onclick="renderDashboard(document.getElementById('content-area'))" title="Refresh Data">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+      </div>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-icon blue"><i class="fas fa-clock"></i></div>
@@ -800,6 +831,12 @@ async function loadStudentData() {
     userId: state.user.id,
   });
   if (!Array.isArray(letters)) letters = [];
+
+  // Filter out research letters from this view
+  const examLetters = letters.filter(
+    (l) => l.letter_type !== "Surat Ijin Penelitian",
+  );
+
   const tbody = document.getElementById("student-letters-body");
 
   const getBadge = (s) => {
@@ -813,7 +850,7 @@ async function loadStudentData() {
   };
 
   tbody.innerHTML =
-    letters
+    examLetters
       .map(
         (l) => `
         <tr style="font-size: 0.9rem;">
@@ -977,6 +1014,167 @@ async function batalkanSurat(id) {
     await api("deleteLetter", { id });
     showToast("Dihapus");
     loadStudentData();
+    if (state.currentView === "research-letters") loadResearchLettersData();
+  }
+}
+
+// --- RESEARCH LETTERS VIEW ---
+function renderResearchLetters(container) {
+  container.innerHTML = `
+        <div class="card">
+            <div class="card-header">
+                <h3><i class="fas fa-microscope"></i> Pengajuan Ijin Penelitian</h3>
+                <button class="btn btn-primary" onclick="openResearchLetterForm()"><i class="fas fa-plus"></i> Ajukan Ijin Penelitian</button>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Judul Penelitian</th>
+                            <th>Tempat Tujuan</th>
+                            <th>Tgl Pengajuan</th>
+                            <th>Status</th>
+                            <th class="td-actions">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="research-letters-body"><tr><td colspan="5" style="text-align:center; padding: 40px;">Memuat data...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+  loadResearchLettersData();
+}
+
+async function loadResearchLettersData() {
+  let letters = await api("getLetters", {
+    role: "mahasiswa",
+    userId: state.user.id,
+  });
+  if (!Array.isArray(letters)) letters = [];
+
+  // Filter only for "Surat Ijin Penelitian"
+  const researchLetters = letters.filter(
+    (l) => l.letter_type === "Surat Ijin Penelitian",
+  );
+
+  const tbody = document.getElementById("research-letters-body");
+  if (!tbody) return;
+
+  const getStatusDisplay = (l) => {
+    if (l.status === "Approved") {
+      return `<span class="badge badge-approved"><i class="fas fa-check-circle"></i> Silakan ambil surat</span>`;
+    }
+    const map = {
+      Draft: "badge-pending",
+      Pending: "badge-pending",
+      Returned: "badge-rejected",
+    };
+    return `<span class="badge ${map[l.status] || "badge-pending"}">${l.status}</span>`;
+  };
+
+  tbody.innerHTML =
+    researchLetters
+      .map(
+        (l) => `
+        <tr style="font-size: 0.9rem;">
+            <td style="max-width:300px; font-weight:600;">${l.proposal_title}</td>
+            <td>${l.exam_location || "-"}</td>
+            <td style="white-space:nowrap">${new Date(l.submission_date).toLocaleDateString("id-ID")}</td>
+            <td>
+                ${getStatusDisplay(l)}
+                ${
+                  l.status === "Returned"
+                    ? `
+                    <div style="margin-top:8px; padding: 8px; background: #fff1f2; border-radius: 4px; border-left: 3px solid #ef4444; font-size: 0.8rem; color: #b91c1c;">
+                        <i class="fas fa-exclamation-circle"></i> <b>Catatan Revisi:</b><br>${l.rejection_notes}
+                    </div>
+                `
+                    : ""
+                }
+            </td>
+            <td class="td-actions">
+                <div style="display:flex; justify-content:flex-end; gap:8px;">
+                    ${
+                      l.status === "Draft" || l.status === "Returned"
+                        ? `
+                        <button class="btn btn-icon" onclick="openResearchLetterForm('${l.id}')" title="Edit"><i class="fas fa-edit" style="color:var(--accent)"></i></button>
+                        <button class="btn btn-icon" onclick="ajukanRisetSurat('${l.id}')" title="Kirim ke Admin"><i class="fas fa-paper-plane" style="color:var(--primary)"></i></button>
+                    `
+                        : ""
+                    }
+                    ${l.status === "Draft" ? `<button class="btn btn-icon danger" onclick="batalkanSurat('${l.id}')" title="Hapus"><i class="fas fa-trash-alt" style="color:var(--danger)"></i></button>` : ""}
+                    ${l.status === "Approved" ? `<button class="btn btn-icon" onclick="previewLetter('${l.id}')" title="Lihat"><i class="fas fa-eye" style="color:var(--primary)"></i></button>` : ""}
+                </div>
+            </td>
+        </tr>
+    `,
+      )
+      .join("") ||
+    '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Belum ada pengajuan ijin penelitian.</td></tr>';
+}
+
+async function openResearchLetterForm(id = null) {
+  let existing = null;
+  if (id) {
+    Object.keys(state.cache).forEach((key) => {
+      if (key.startsWith("getLetters") && state.cache[key].data) {
+        const found = state.cache[key].data.find((l) => l.id == id);
+        if (found) existing = found;
+      }
+    });
+  }
+
+  showModal(
+    id ? "Edit Ijin Penelitian" : "Ajukan Ijin Penelitian Baru",
+    `
+        <form id="research-letter-form">
+            <div class="form-group">
+                <label><i class="fas fa-heading"></i> Judul Penelitian</label>
+                <textarea id="r_title" class="form-input" rows="3" placeholder="Masukkan judul penelitian lengkap" required>${existing ? existing.proposal_title : ""}</textarea>
+            </div>
+            <div class="form-group">
+                <label><i class="fas fa-map-marker-alt"></i> Tempat Tujuan Penelitian</label>
+                <input id="r_location" class="form-input" value="${existing ? existing.exam_location : ""}" placeholder="Contoh: Rumah Sakit Umum Daerah..., Desa..." required>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px">
+                <button type="button" class="btn" onclick="closeModal()">Batal</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-check-circle"></i> ${id ? "Simpan Perubahan" : "Simpan sebagai Draft"}
+                </button>
+            </div>
+        </form>
+    `,
+  );
+
+  document.getElementById("research-letter-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const data = {
+      id: id || null,
+      letter_type: "Surat Ijin Penelitian",
+      proposal_title: document.getElementById("r_title").value,
+      exam_location: document.getElementById("r_location").value,
+      student_id: state.user.id,
+      student_name: state.user.name,
+      student_nim: state.user.nip_nim,
+      // Default empty values for other fields to avoid backend issues
+      exam_date: "",
+      exam_time: "",
+      exam_time_end: "",
+      examiner_name: "-",
+      supervisor_name: "-",
+    };
+    await api("submitLetter", { data });
+    showToast(id ? "Berhasil diperbarui" : "Draft tersimpan");
+    closeModal();
+    loadResearchLettersData();
+  };
+}
+
+async function ajukanRisetSurat(id) {
+  if (confirm("Ajukan surat ijin penelitian ini ke admin?")) {
+    await api("updateLetterStatus", { id, status: "Pending", updateData: {} });
+    showToast("Surat diajukan");
+    loadResearchLettersData();
   }
 }
 
@@ -987,7 +1185,12 @@ function renderValidationQueue(container) {
   container.innerHTML = `
         <div class="card">
             <div class="card-header">
-                <h3><i class="fas fa-clipboard-check"></i> Antrean Validasi</h3>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <h3><i class="fas fa-clipboard-check"></i> Antrean Validasi</h3>
+                    <button class="btn btn-icon" onclick="loadValidationQueue(true)" title="Refresh Antrean">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
                 <div class="search-container">
                     <i class="fas fa-search"></i>
                     <input type="text" id="v-search" placeholder="Cari nama, NIM, atau judul..." autocomplete="off">
@@ -1003,12 +1206,11 @@ function renderValidationQueue(container) {
                             <th>Judul</th>
                             <th>Tujuan (Penguji)</th>
                             <th>Tgl Pengajuan</th>
-                            <th>Jam</th>
                             <th>Status</th>
                             <th class="td-actions">Aksi</th>
                         </tr>
                     </thead>
-                    <tbody id="validation-table-body"><tr><td colspan="8" style="text-align:center; padding:40px;">Memuat antrean...</td></tr></tbody>
+                    <tbody id="validation-table-body"><tr><td colspan="7" style="text-align:center; padding:40px;">Memuat antrean...</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -1022,10 +1224,10 @@ function renderValidationQueue(container) {
   loadValidationQueue();
 }
 
-async function loadValidationQueue() {
+async function loadValidationQueue(force = false) {
   const searchQuery =
     document.getElementById("v-search")?.value.toLowerCase() || "";
-  let letters = await api("getLetters", { role: "admin" });
+  let letters = await api("getLetters", { role: "admin" }, force);
 
   // Filter only PENDING and match search
   const filtered = (letters || []).filter((l) => {
@@ -1055,27 +1257,29 @@ async function loadValidationQueue() {
             </td>
             <td>
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <span style="display:flex; align-items:center; gap:8px; font-size:0.85rem;"><i class="fas fa-user-tie" style="color:var(--primary); width:14px"></i> 1. ${l.examiner_name}</span>
-                    <span style="display:flex; align-items:center; gap:8px; font-size:0.85rem;"><i class="fas fa-user-graduate" style="color:var(--secondary); width:14px"></i> 2. ${l.supervisor_name}</span>
+                    ${
+                      l.letter_type === "Surat Ijin Penelitian"
+                        ? `<span style="display:flex; align-items:center; gap:8px; font-size:0.85rem;"><i class="fas fa-map-marker-alt" style="color:var(--primary); width:14px"></i> Tujuan: ${l.exam_location}</span>`
+                        : `
+                        <span style="display:flex; align-items:center; gap:8px; font-size:0.85rem;"><i class="fas fa-user-tie" style="color:var(--primary); width:14px"></i> 1. ${l.examiner_name}</span>
+                        <span style="display:flex; align-items:center; gap:8px; font-size:0.85rem;"><i class="fas fa-user-graduate" style="color:var(--secondary); width:14px"></i> 2. ${l.supervisor_name}</span>
+                        `
+                    }
                 </div>
             </td>
             <td style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-muted)">
                 <i class="far fa-calendar-alt"></i> ${new Date(l.submission_date).toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}
             </td>
-            <td style="font-size:0.85rem; font-weight:600; white-space:nowrap; color:var(--text-muted)">
-                <i class="far fa-clock"></i> ${formatTimeID(l.exam_time)}
-            </td>
-            <td><span class="badge badge-pending">Pending</span></td>
             <td class="td-actions">
                 <div style="display:flex; justify-content:flex-end; gap:10px; align-items:center;">
                     <button class="btn btn-icon" title="Preview" onclick="previewLetter('${l.id}')">
                         <i class="fas fa-eye" style="color:var(--primary)"></i>
                     </button>
                     <button class="btn btn-sm btn-success" title="Setujui dan Beri Nomor" onclick="approveLetter('${l.id}')">
-                        <i class="fas fa-check"></i> Setujui
+                        <i class="fas fa-check"></i> Terima
                     </button>
                     <button class="btn btn-sm btn-danger" title="Kembalikan untuk Revisi" onclick="returnLetter('${l.id}')">
-                        <i class="fas fa-undo"></i> Return
+                        <i class="fas fa-times"></i> Tolak
                     </button>
                 </div>
             </td>
@@ -1083,7 +1287,7 @@ async function loadValidationQueue() {
     `,
       )
       .join("") ||
-    '<tr><td colspan="8" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
+    '<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--text-muted)">Tidak ada antrean validasi.</td></tr>';
 }
 
 // --- ARCHIVE (APPROVED ONLY) ---
@@ -1091,7 +1295,12 @@ function renderArchive(container) {
   container.innerHTML = `
         <div class="card">
             <div class="card-header">
-                <h3><i class="fas fa-archive"></i> Arsip Surat Selesai</h3>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <h3><i class="fas fa-archive"></i> Arsip Surat Undangan</h3>
+                    <button class="btn btn-icon" onclick="loadArchive(true)" title="Refresh Arsip">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
                 <div class="search-container">
                     <i class="fas fa-search"></i>
                     <input type="text" id="a-search" placeholder="Cari nomor, nama, atau NIM..." autocomplete="off">
@@ -1122,20 +1331,21 @@ function renderArchive(container) {
   loadArchive();
 }
 
-async function loadArchive() {
+async function loadArchive(force = false) {
   const searchQuery =
     document.getElementById("a-search")?.value.toLowerCase() || "";
-  let letters = await api("getLetters", { role: "admin" });
+  let letters = await api("getLetters", { role: "admin" }, force);
 
-  // Filter only APPROVED and match search
+  // Filter only APPROVED, NOT research letter, and match search
   const filtered = (letters || []).filter((l) => {
     const isApproved = l.status === "Approved";
+    const isNotResearch = l.letter_type !== "Surat Ijin Penelitian";
     const matchesSearch =
       (l.letter_number || "").toLowerCase().includes(searchQuery) ||
       l.student_name.toLowerCase().includes(searchQuery) ||
       l.student_nim.toLowerCase().includes(searchQuery) ||
       (l.proposal_title || "").toLowerCase().includes(searchQuery);
-    return isApproved && matchesSearch;
+    return isApproved && isNotResearch && matchesSearch;
   });
 
   const tbody = document.getElementById("archive-table-body");
@@ -1170,6 +1380,100 @@ async function loadArchive() {
       )
       .join("") ||
     '<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--text-muted)">Arsip kosong atau tidak ditemukan.</td></tr>';
+}
+
+// --- ARCHIVE RESEARCH ---
+function renderArchiveResearch(container) {
+  container.innerHTML = `
+        <div class="card">
+            <div class="card-header">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <h3><i class="fas fa-folder-open"></i> Arsip Ijin Penelitian Selesai</h3>
+                    <button class="btn btn-icon" onclick="loadArchiveResearch(true)" title="Refresh Arsip">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="ar-search" placeholder="Cari nomor, nama, atau NIM..." autocomplete="off">
+                    <button class="btn-search" onclick="loadArchiveResearch()">Cari</button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>No Surat</th>
+                            <th>Mahasiswa</th>
+                            <th>Judul Penelitian</th>
+                            <th>Tempat Tujuan</th>
+                            <th>Tgl Pengajuan / Terima</th>
+                            <th class="td-actions">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="archive-research-table-body"><tr><td colspan="6" style="text-align:center; padding:40px;">Memuat arsip...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+  document.getElementById("ar-search")?.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") loadArchiveResearch();
+  });
+
+  loadArchiveResearch();
+}
+
+async function loadArchiveResearch(force = false) {
+  const searchQuery =
+    document.getElementById("ar-search")?.value.toLowerCase() || "";
+  let letters = await api("getLetters", { role: "admin" }, force);
+
+  const filtered = (letters || []).filter((l) => {
+    const isApproved = l.status === "Approved";
+    const isResearch = l.letter_type === "Surat Ijin Penelitian";
+    const matchesSearch =
+      (l.letter_number || "").toLowerCase().includes(searchQuery) ||
+      l.student_name.toLowerCase().includes(searchQuery) ||
+      l.student_nim.toLowerCase().includes(searchQuery) ||
+      (l.proposal_title || "").toLowerCase().includes(searchQuery);
+    return isApproved && isResearch && matchesSearch;
+  });
+
+  const tbody = document.getElementById("archive-research-table-body");
+  if (!tbody) return;
+
+  tbody.innerHTML =
+    filtered
+      .map(
+        (l) => `
+        <tr>
+            <td style="font-weight:700; color:var(--primary)">${l.letter_number || "-"}</td>
+            <td>
+                <div style="font-weight:700">${l.student_name}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted)">${l.student_nim}</div>
+            </td>
+            <td style="max-width:250px">
+                <div style="font-size:0.8rem; color:var(--text-main); font-weight:600;">${l.proposal_title}</div>
+            </td>
+            <td>
+                <div style="font-size:0.85rem; font-weight:600"><i class="fas fa-map-marker-alt" style="color:var(--primary)"></i> ${l.exam_location}</div>
+            </td>
+            <td>
+                <div style="font-size:0.8rem; color:var(--text-main); font-weight:600;"><i class="far fa-paper-plane"></i> ${formatDateID(l.submission_date)}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);"><i class="fas fa-check-circle"></i> ${l.approval_date ? formatDateID(l.approval_date) : "-"}</div>
+            </td>
+            <td class="td-actions">
+                <div style="display:flex; justify-content:flex-end; gap:8px;">
+                    <button class="btn btn-icon" title="Preview" onclick="previewLetter('${l.id}')"><i class="fas fa-eye" style="color:var(--primary)"></i></button>
+                    <button class="btn btn-icon" title="Cetak" onclick="printLetter('${l.id}')"><i class="fas fa-print" style="color:var(--secondary)"></i></button>
+                </div>
+            </td>
+        </tr>
+    `,
+      )
+      .join("") ||
+    '<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--text-muted)">Arsip ijin penelitian kosong.</td></tr>';
 }
 
 function revealTitle(id) {
@@ -1214,7 +1518,7 @@ async function approveLetter(id) {
     `
         <form id="approve-form">
             <div class="form-group"><label>Nomor Surat</label>
-            <div style="display:flex"><span style="padding:10px;background:#eee">PP.06.02/F.XXIX.19.4/</span><input id="a_num" class="form-input" required></div>
+            <div style="display:flex"><span style="padding:10px;background:#eee">PP.06.02/F.XXIX.19/4/</span><input id="a_num" class="form-input" required></div>
             </div>
             <div style="margin-top:20px; text-align:right">
                 <button type="button" class="btn" onclick="closeModal()">Batal</button>
@@ -1227,11 +1531,10 @@ async function approveLetter(id) {
     e.preventDefault();
     const updateData = {
       letter_number:
-        "PP.06.02/F.XXIX.19.4/" + document.getElementById("a_num").value,
+        "PP.06.02/F.XXIX.19/4/" + document.getElementById("a_num").value,
       signatory_position: settings.signatory_position,
       signatory_name: settings.signatory_name,
       signatory_nip: settings.signatory_nip,
-      letter_date: new Date().toISOString(),
     };
     await api("updateLetterStatus", { id, status: "Approved", updateData });
     showToast("Surat Disetujui");
@@ -1509,8 +1812,8 @@ async function renderSignatorySettings(container) {
 
 // --- PREVIEW & PRINT ---
 function buildLetterHTML(l, forPrint = false) {
-  const dUjian = new Date(l.exam_date || Date.now());
-  const dSurat = new Date(l.letter_date || Date.now());
+  const dExam = new Date(l.exam_date || Date.now());
+  const dLetter = new Date(l.approval_date || l.submission_date || Date.now());
   const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const months = [
     "Januari",
@@ -1526,12 +1829,86 @@ function buildLetterHTML(l, forPrint = false) {
     "November",
     "Desember",
   ];
-  const dateStrUjian = `${dUjian.getDate()} ${months[dUjian.getMonth()]} ${dUjian.getFullYear()}`;
-  const dayNameUjian = days[dUjian.getDay()];
-  const dateStrSurat = `${dSurat.getDate()} ${months[dSurat.getMonth()]} ${dSurat.getFullYear()}`;
+
+  const letterDateStr = `${dLetter.getDate()} ${months[dLetter.getMonth()]} ${dLetter.getFullYear()}`;
+  const examDateStr = `${dExam.getDate()} ${months[dExam.getMonth()]} ${dExam.getFullYear()}`;
+  const examDayName = days[dExam.getDay()];
 
   const kopUrl = new URL("assets/kop.png", window.location.href).href;
   const ttdUrl = new URL("assets/ttd.png", window.location.href).href;
+
+  const fixTime = (t) => {
+    if (!t) return "";
+    if (t.includes("T")) {
+      const dt = new Date(t);
+      return dt
+        .toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+        .replace(".", ":");
+    }
+    return t;
+  };
+
+  if (l.letter_type === "Surat Ijin Penelitian") {
+    return `
+      <div style="font-family:'Times New Roman', serif; line-height: 1.6; color: black; padding: 20px;">
+          <div style="text-align:center;margin-bottom:20px">
+              <img src="${kopUrl}" onerror="this.style.display='none'" style="width:100%;max-width:700px">
+          </div>
+          
+          <table style="width:100%; margin-bottom: 20px;">
+              <tr>
+                  <td style="width:80px">Nomor</td>
+                  <td style="width:10px">:</td>
+                  <td>${l.letter_number || "......."}</td>
+                  <td style="text-align:right">${letterDateStr}</td>
+              </tr>
+              <tr>
+                  <td>Perihal</td>
+                  <td>:</td>
+                  <td colspan="2"><b>Ijin Penelitian</b></td>
+              </tr>
+          </table>
+
+          <p>Yth. <br>Pimpinan / Kepala <br><b>${l.exam_location}</b></p>
+          
+          <p>Dengan hormat,<br>Dalam rangka penyelesaian tugas akhir/skripsi mahasiswa kami, dengan ini kami mengajukan permohonan ijin penelitian bagi mahasiswa berikut:</p>
+          
+          <table style="margin-left:30px; margin-bottom: 20px; width: calc(100% - 30px);">
+              <tr>
+                  <td style="width:120px;">Nama</td>
+                  <td style="width:15px;">:</td>
+                  <td><b>${l.student_name}</b></td>
+              </tr>
+              <tr>
+                  <td>NIM</td>
+                  <td>:</td>
+                  <td>${l.student_nim}</td>
+              </tr>
+              <tr>
+                  <td style="vertical-align: top;">Judul Penelitian</td>
+                  <td style="vertical-align: top;">:</td>
+                  <td style="text-align: justify; padding-right: 20px;">"${l.proposal_title}"</td>
+              </tr>
+              <tr>
+                  <td style="vertical-align: top;">Tempat Tujuan</td>
+                  <td style="vertical-align: top;">:</td>
+                  <td>${l.exam_location}</td>
+              </tr>
+          </table>
+          
+          <p>Demikian permohonan ini kami sampaikan. Atas bantuan dan kerjasama Bapak/Ibu, kami ucapkan terima kasih.</p>
+          
+          <div style="margin-top:40px; float:right; width:300px; text-align:center">
+              <p>${l.signatory_position || "Ketua Program Studi"},</p>
+              <div style="height:80px; display:flex; align-items:center; justify-content:center;">
+                  ${forPrint ? `<img src="${ttdUrl}" style="height:80px">` : '<div style="color:#ccc; font-style:italic">[Tanda Tangan Digital]</div>'}
+              </div>
+              <p><b>${l.signatory_name || "................"}</b><br>NIP. ${l.signatory_nip || "................"}</p>
+          </div>
+          <div style="clear:both"></div>
+      </div>
+    `;
+  }
 
   return `
     <div style="font-family:'Times New Roman', serif; line-height: 1.6; color: black; padding: 20px;">
@@ -1544,7 +1921,7 @@ function buildLetterHTML(l, forPrint = false) {
                 <td style="width:80px">Nomor</td>
                 <td style="width:10px">:</td>
                 <td>${l.letter_number || "......."}</td>
-                <td style="text-align:right">${dateStrSurat}</td>
+                <td style="text-align:right">${letterDateStr}</td>
             </tr>
             <tr>
                 <td>Perihal</td>
@@ -1580,12 +1957,12 @@ function buildLetterHTML(l, forPrint = false) {
             <tr>
                 <td style="width:100px;">Hari/Tgl</td>
                 <td style="width:15px;">:</td>
-                <td>${dayNameUjian}, ${dateStrUjian}</td>
+                <td>${examDayName}, ${examDateStr}</td>
             </tr>
             <tr>
                 <td>Jam</td>
                 <td>:</td>
-                <td>${formatTimeID(l.exam_time)} s/d ${formatTimeID(l.exam_time_end) || "Selesai"} WITA</td>
+                <td>${fixTime(l.exam_time)} s/d ${fixTime(l.exam_time_end) || "Selesai"} WITA</td>
             </tr>
             <tr>
                 <td>Tempat</td>
@@ -1593,14 +1970,19 @@ function buildLetterHTML(l, forPrint = false) {
                 <td>${l.exam_location}</td>
             </tr>
         </table>
-
-        <div style="margin-top:40px; margin-left:auto; width:300px; text-align:center">
-            <p>${l.signatory_position || ""}</p>
-            ${l.status === "Approved" ? `<img src="${ttdUrl}" style="height:100px; margin: 5px 0;">` : "<br><br><br><br><br><br><br><br><br><br>"}
-            <p style="text-decoration:underline; font-weight:bold; margin-bottom: 0;">${l.signatory_name || "................"}</p>
-            <p style="margin-top: 0;">NIP. ${l.signatory_nip || "................"}</p>
+        
+        <p>Demikian penyampaian kami. Atas perhatian dan kehadirannya, kami ucapkan terima kasih.</p>
+        
+        <div style="margin-top:20px; float:right; width:300px; text-align:center">
+            <p>${l.signatory_position || "Ketua Program Studi"},</p>
+            <div style="height:80px; display:flex; align-items:center; justify-content:center;">
+                ${forPrint ? `<img src="${ttdUrl}" style="height:80px">` : '<div style="color:#ccc; font-style:italic">[Tanda Tangan Digital]</div>'}
+            </div>
+            <p><b>${l.signatory_name || "................"}</b><br>NIP. ${l.signatory_nip || "................"}</p>
         </div>
-    </div>`;
+        <div style="clear:both"></div>
+    </div>
+  `;
 }
 
 async function previewLetter(id) {
@@ -1667,9 +2049,11 @@ document.getElementById("login-form").onsubmit = async (e) => {
       password: document.getElementById("password").value,
     });
     state.user = res.user;
+    localStorage.setItem("user", JSON.stringify(state.user)); // Persist user
+    state.cache = {}; // Clear cache to force fresh data
+
     document.getElementById("user-display-name").innerText = state.user.name;
     document.getElementById("user-display-role").innerText = state.user.role;
-    // Removed avatar initial setting
     switchScreen("dashboard-screen");
     navigateTo("dashboard");
   } catch (err) {
@@ -1681,6 +2065,9 @@ document.getElementById("close-modal").onclick = closeModal;
 
 document.getElementById("btn-logout").onclick = () => {
   state.user = null;
+  localStorage.removeItem("user");
+  localStorage.removeItem("currentView");
+  state.cache = {};
   switchScreen("login-screen");
   document.getElementById("login-form").reset();
 };
@@ -1704,4 +2091,27 @@ document.addEventListener("click", (e) => {
   }
 });
 
-switchScreen("login-screen");
+// --- INITIALIZATION ---
+window.onload = async () => {
+  const savedUser = localStorage.getItem("user");
+  const savedView = localStorage.getItem("currentView");
+
+  if (savedUser) {
+    try {
+      state.user = JSON.parse(savedUser);
+      state.cache = {}; // Force fresh data on load
+
+      document.getElementById("user-display-name").innerText = state.user.name;
+      document.getElementById("user-display-role").innerText = state.user.role;
+
+      switchScreen("dashboard-screen");
+      navigateTo(savedView || "dashboard");
+    } catch (e) {
+      console.error("Failed to restore session", e);
+      localStorage.removeItem("user");
+      switchScreen("login-screen");
+    }
+  } else {
+    switchScreen("login-screen");
+  }
+};
